@@ -18,30 +18,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout repository
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
 
-      # 3. Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # 4. Run unit tests when configured
       - name: Run unit tests
         run: npm test --if-present
 
-      # 5. Install Snyk CLI
       - name: Install Snyk
         run: npm install --global snyk
 
-      # 6. Snyk dependency scan
       - name: Snyk dependency scan
         if: ${{ secrets.SNYK_TOKEN != '' }}
         continue-on-error: true
@@ -49,32 +42,32 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: snyk test
 
-      # 7. Start application
       - name: Start application
         run: |
           npm start > app.log 2>&1 &
           echo $! > app.pid
 
           for i in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:3000/health; then
-              echo "Application is ready."
+            if curl -fsS http://127.0.0.1:3000/health; then
+              echo "Application is ready"
               exit 0
             fi
-
             sleep 2
           done
 
-          echo "Application failed to start."
+          echo "Application failed to start"
           cat app.log
           exit 1
 
-      # 8. OWASP ZAP baseline scan
-      - name: OWASP ZAP baseline scan
-        continue-on-error: true
+      - name: Prepare ZAP report directory
+        if: always()
         run: |
           mkdir -p reports
           chmod 777 reports
 
+      - name: OWASP ZAP baseline scan
+        continue-on-error: true
+        run: |
           docker run --rm \
             --network host \
             --user root \
@@ -86,7 +79,6 @@ jobs:
             -r zap-report.html \
             -I
 
-      # 9. Stop application
       - name: Stop application
         if: always()
         run: |
@@ -94,7 +86,6 @@ jobs:
             kill "$(cat app.pid)" 2>/dev/null || true
           fi
 
-      # 10. Upload security reports
       - name: Upload security reports
         if: always()
         uses: actions/upload-artifact@v4
