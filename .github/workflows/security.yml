@@ -56,6 +56,7 @@ jobs:
           curl -fsS http://127.0.0.1:3000/health
 
                   - name: OWASP ZAP baseline scan
+              - name: OWASP ZAP baseline scan
         run: |
           mkdir -p reports
           chmod 777 reports
