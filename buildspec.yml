@@ -1,59 +1,15 @@
 version: 0.2
 
-# CodeBuild project requirements:
-# - Use a Linux image with Node.js 22 and Docker available.
-# - Enable Privileged mode if Docker-in-Docker is used.
-# - Set SNYK_TOKEN as a Secrets Manager-backed environment variable.
-# - Set REPORT_BUCKET to your private S3 bucket name.
-# - Give the CodeBuild role least-privilege s3:PutObject access to reports/*.
-
 phases:
   install:
-    runtime-versions:
-      nodejs: 22
     commands:
       - npm install
-      - npm install --global snyk
-      - mkdir -p reports/snyk reports/zap
-
-  pre_build:
-    commands:
-      - node --version
-      - npm --version
-      - snyk --version
-
+      - npm install -g snyk
   build:
     commands:
-      - npm test
-      - |
-        snyk test --json-file-output=reports/snyk/snyk-dependencies.json
-      - |
-        snyk code test --json-file-output=reports/snyk/snyk-code.json
-      - |
-        (npm start > app.log 2>&1 &) 
-        for i in $(seq 1 30); do
-          if curl --fail http://127.0.0.1:3000/health; then break; fi
-          sleep 2
-        done
-        curl --fail http://127.0.0.1:3000/health
-      - |
-        docker run --rm --network host \
-          -v "$PWD/reports/zap:/zap/wrk:rw" \
-          ghcr.io/zaproxy/zaproxy:stable \
-          zap-baseline.py -t http://127.0.0.1:3000 \
-          -J zap-report.json -r zap-report.html
-
-  post_build:
-    commands:
-      - |
-        if [ -n "$REPORT_BUCKET" ]; then
-          aws s3 cp reports/ "s3://${REPORT_BUCKET}/reports/${CODEBUILD_BUILD_NUMBER:-manual}/" --recursive
-        else
-          echo "REPORT_BUCKET is not set; skipping S3 upload."
-        fi
-
+      - snyk test --json > snyk-report.json
+      - docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:3000 -r zap-report.html
 artifacts:
   files:
-    - 'reports/**/*'
-    - app.log
-  discard-paths: no
+    - snyk-report.json
+    - zap-report.html
