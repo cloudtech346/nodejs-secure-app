@@ -11,5 +11,5 @@ phases:
       - docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:3000 -r zap-report.html
 artifacts:
   files:
-    - snyk-report.json
+    - snyk test
     - zap-report.html
