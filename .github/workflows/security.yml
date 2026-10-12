@@ -2,51 +2,81 @@ name: Security Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+
+permissions:
+  contents: read
 
 jobs:
   build-and-scan:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout repository
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
+          cache: npm
 
+      # 3. Install dependencies
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
+      # 4. Start Node.js application
       - name: Start Node App
-        run: nohup npm start &
+        run: |
+          npm start > app.log 2>&1 &
+          echo $! > app.pid
 
+      # 5. Wait for the application to become available
+      - name: Wait for Node App
+        run: |
+          for i in {1..30}; do
+            if curl --fail http://127.0.0.1:3000/; then
+              echo "Application is running."
+              exit 0
+            fi
+
+            echo "Waiting for application to start..."
+            sleep 2
+          done
+
+          echo "Application failed to start."
+          cat app.log
+          exit 1
+
+      # 6. Run Snyk SCA + SAST
       - name: Run Snyk SCA + SAST
         uses: snyk/actions/node@master
         with:
           command: test
+          args: --sarif-file-output=snyk-report.sarif
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # Install OWASP ZAP via apt (no Docker)
-      - name: Install OWASP ZAP
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y zaproxy
-
-      # Run OWASP ZAP Baseline Scan
+      # 7. Run OWASP ZAP DAST Scan
       - name: OWASP ZAP DAST Scan
-        run: |
-          zap-baseline.py -t http://localhost:3000 -r zap-report.html
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: "http://127.0.0.1:3000"
+          artifact_name: zap-report
 
-      - name: Upload Reports
+      # 8. Upload security reports
+      - name: Upload Security Reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
           path: |
-            snyk-report.json
+            snyk-report.sarif
             zap-report.html
+            app.log
+          if-no-files-found: warn
+          retention-days: 30
