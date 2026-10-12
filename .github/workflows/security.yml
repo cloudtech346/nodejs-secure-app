@@ -60,6 +60,12 @@ jobs:
           args: --json-file-output=snyk-report.json
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+          
+      # 6b. Snyk Code SAST scan
+      - name: Run Snyk Code SAST
+        run: npx --yes snyk code test --json-file-output=snyk-code-report.json
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       # 7. OWASP ZAP DAST scan
       - name: OWASP ZAP DAST Scan
@@ -76,6 +82,7 @@ jobs:
           name: security-reports
           path: |
             snyk-report.json
+            snyk-code-report.json
             zap-report.html
             app.log
           if-no-files-found: warn
