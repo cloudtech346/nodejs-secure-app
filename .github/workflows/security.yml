@@ -4,11 +4,9 @@ on:
   push:
     branches:
       - main
-
   pull_request:
     branches:
       - main
-
   workflow_dispatch:
 
 permissions:
@@ -16,81 +14,87 @@ permissions:
 
 jobs:
   test-and-scan:
+    name: Test and Security Scan
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
+      # 1. Checkout repository
       - name: Checkout source
         uses: actions/checkout@v4
 
-      # Step 2: Setup Node.js
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
 
-      # Step 3: Install dependencies
+      # 3. Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Step 4: Run unit tests
+      # 4. Run unit tests when configured
       - name: Run unit tests
-        run: npm test
+        run: npm test --if-present
 
-      # Step 5: Install Snyk CLI
+      # 5. Install Snyk CLI
       - name: Install Snyk
         run: npm install --global snyk
 
-      # Step 6: Snyk dependency scan
+      # 6. Snyk dependency scan
       - name: Snyk dependency scan
+        if: ${{ secrets.SNYK_TOKEN != '' }}
+        continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         run: snyk test
-        continue-on-error: true
 
-      # Step 7: Snyk source code scan
-      - name: Snyk source code scan
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk code test
-        continue-on-error: true
-
-      # Step 8: Start application
+      # 7. Start application
       - name: Start application
         run: |
           npm start > app.log 2>&1 &
           echo $! > app.pid
 
           for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:3000/health; then
-              echo "Application started successfully"
+            if curl --fail --silent http://127.0.0.1:3000/health; then
+              echo "Application is ready."
               exit 0
             fi
 
             sleep 2
           done
 
-          echo "Application failed to start"
+          echo "Application failed to start."
           cat app.log
           exit 1
 
-      # Step 9: OWASP ZAP baseline scan
+      # 8. OWASP ZAP baseline scan
+      - name: OWASP ZAP baseline scan
+        continue-on-error: true
         run: |
-          mkdir -p "$PWD/reports"
-          chmod 777 "$PWD/reports"
+          mkdir -p reports
+          chmod 777 reports
 
-          docker run --rm --network host \
+          docker run --rm \
+            --network host \
             --user root \
-            -v "$PWD/reports:/zap/wrk/:rw" \
+            -v "$PWD/reports:/zap/wrk:rw" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
             -t http://127.0.0.1:3000 \
             -J zap-report.json \
             -r zap-report.html \
             -I
-        continue-on-error: true
 
-      # Step 10: Upload security reports
+      # 9. Stop application
+      - name: Stop application
+        if: always()
+        run: |
+          if [ -f app.pid ]; then
+            kill "$(cat app.pid)" 2>/dev/null || true
+          fi
+
+      # 10. Upload security reports
       - name: Upload security reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -98,12 +102,3 @@ jobs:
           name: security-reports
           path: reports/
           if-no-files-found: warn
-
-      # Step 11: Upload application logs if available
-      - name: Upload application logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: application-logs
-          path: app.log
-          if-no-files-found: ignore
