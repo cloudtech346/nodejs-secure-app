@@ -2,14 +2,19 @@ version: 0.2
 
 phases:
   install:
+    runtime-versions:
+      nodejs: 20
     commands:
       - npm install
       - npm install -g snyk
+
   build:
     commands:
       - snyk test --json > snyk-report.json || true
-      docker run --rm -v "$(pwd):/zap/wrk/:rw" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://localhost:3000 -r zap-report.html
+      - mkdir -p reports
+      - docker run --rm -v "$(pwd):/zap/wrk/:rw" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://example.com -J /zap/wrk/reports/zap-report.json -r /zap/wrk/reports/zap-report.html || true
+
 artifacts:
   files:
-    - snyk test
-    - zap-report.html
+    - snyk-report.json
+    - reports/**/*
