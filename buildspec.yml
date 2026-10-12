@@ -8,7 +8,7 @@ phases:
   build:
     commands:
       - snyk test --json > snyk-report.json || true
-      - docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py -t http://localhost:3000 -r zap-report.html
+      docker run --rm -v "$(pwd):/zap/wrk/:rw" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://localhost:3000 -r zap-report.html
 artifacts:
   files:
     - snyk test
