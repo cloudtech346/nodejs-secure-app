@@ -1,95 +1,43 @@
-name: Node.js DevSecOps Security
+name: Security Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: read
+    branches: [ "main" ]
 
 jobs:
-  test-and-scan:
-    name: Test and Security Scan
+  build-and-scan:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v3
         with:
-          node-version: "22"
+          node-version: '18'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Run unit tests
-        run: npm test --if-present
-
-      - name: Install Snyk
-        run: npm install --global snyk
-
-      - name: Snyk dependency scan
-        if: ${{ secrets.SNYK_TOKEN != '' }}
-        continue-on-error: true
+      - name: Run Snyk SCA + SAST
+        uses: snyk/actions/node@master
+        with:
+          command: test
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: snyk test
 
-      - name: Start application
+      - name: OWASP ZAP DAST Scan
         run: |
-          npm start > app.log 2>&1 &
-          echo $! > app.pid
+          docker run -v $(pwd):/zap/wrk/:rw -t owasp/zap2docker-stable zap-baseline.py \
+            -t http://localhost:3000 -r zap-report.html
 
-          for i in {1..30}; do
-            if curl -fsS http://127.0.0.1:3000/health; then
-              echo "Application is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-
-          echo "Application failed to start"
-          cat app.log
-          exit 1
-
-      - name: Prepare ZAP report directory
-        if: always()
-        run: |
-          mkdir -p reports
-          chmod 777 reports
-
-      - name: OWASP ZAP baseline scan
-        continue-on-error: true
-        run: |
-          docker run --rm \
-            --network host \
-            --user root \
-            -v "$PWD/reports:/zap/wrk:rw" \
-            ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-            -t http://127.0.0.1:3000 \
-            -J zap-report.json \
-            -r zap-report.html \
-            -I
-
-      - name: Stop application
-        if: always()
-        run: |
-          if [ -f app.pid ]; then
-            kill "$(cat app.pid)" 2>/dev/null || true
-          fi
-
-      - name: Upload security reports
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload Reports
+        uses: actions/upload-artifact@v3
         with:
           name: security-reports
-          path: reports/
-          if-no-files-found: warn
+          path: |
+            snyk-report.json
+            zap-report.html
