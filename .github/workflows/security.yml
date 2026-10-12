@@ -37,12 +37,19 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # OWASP ZAP DAST Scan (CLI mode, no Docker)
-      - name: OWASP ZAP DAST Scan
+      # OWASP ZAP DAST Scan (download release, no Docker)
+      - name: Install OWASP ZAP
         run: |
           sudo apt-get update
-          sudo apt-get install -y zaproxy
-          zap-baseline.py -t http://localhost:3000 -r zap-report.html
+          sudo apt-get install -y default-jre wget unzip
+          wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.zip
+          unzip ZAP_2_14_0_unix.zip -d zap
+          ls zap
+
+      - name: Run OWASP ZAP Baseline Scan
+        run: |
+          zap/ZAP_2_14_0/zap.sh -cmd -addoninstallall
+          zap/ZAP_2_14_0/zap-baseline.py -t http://localhost:3000 -r zap-report.html
 
       # Upload Reports
       - name: Upload Reports
