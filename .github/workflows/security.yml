@@ -75,11 +75,12 @@ jobs:
           exit 1
 
       # Step 9: OWASP ZAP baseline scan
-      - name: OWASP ZAP baseline scan
         run: |
-          mkdir -p reports
+          mkdir -p "$PWD/reports"
+          chmod 777 "$PWD/reports"
 
           docker run --rm --network host \
+            --user root \
             -v "$PWD/reports:/zap/wrk/:rw" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
