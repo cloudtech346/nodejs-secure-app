@@ -12,7 +12,6 @@ phases:
     commands:
       - snyk test --json > snyk-report.json || true
       - mkdir -p reports
-      mkdir -p reports
 docker run --rm -v "$(pwd):/zap/wrk/:rw" ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t https://example.com -J zap-report.json -r zap-report.html || true
 mv zap-report.json zap-report.html reports/ 2>/dev/null || true
 
