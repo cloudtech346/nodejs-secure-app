@@ -37,12 +37,12 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # OWASP ZAP DAST Scan (CLI Action, no Docker pull)
+      # OWASP ZAP DAST Scan (CLI mode, no Docker)
       - name: OWASP ZAP DAST Scan
-        uses: zaproxy/action-full-scan@v0.4.0
-        with:
-          target: 'http://localhost:3000'
-          cmd_options: '-a'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zaproxy
+          zap-baseline.py -t http://localhost:3000 -r zap-report.html
 
       # Upload Reports
       - name: Upload Reports
@@ -51,4 +51,4 @@ jobs:
           name: security-reports
           path: |
             snyk-report.json
-            report_html.html
+            zap-report.html
