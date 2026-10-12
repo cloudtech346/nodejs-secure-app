@@ -11,25 +11,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout code
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      # Install dependencies
       - name: Install dependencies
         run: npm install
 
-      # Start NodeJS app in background
       - name: Start Node App
         run: nohup npm start &
 
-      # Run Snyk SCA + SAST
       - name: Run Snyk SCA + SAST
         uses: snyk/actions/node@master
         with:
@@ -37,21 +32,17 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # OWASP ZAP DAST Scan (download release, no Docker)
+      # Install OWASP ZAP via apt (no Docker)
       - name: Install OWASP ZAP
         run: |
           sudo apt-get update
-          sudo apt-get install -y default-jre wget unzip
-          wget https://github.com/zaproxy/zaproxy/releases/download/v2.14.0/ZAP_2_14_0_unix.zip
-          unzip ZAP_2_14_0_unix.zip -d zap
-          ls zap
+          sudo apt-get install -y zaproxy
 
-      - name: Run OWASP ZAP Baseline Scan
+      # Run OWASP ZAP Baseline Scan
+      - name: OWASP ZAP DAST Scan
         run: |
-          zap/ZAP_2_14_0/zap.sh -cmd -addoninstallall
-          zap/ZAP_2_14_0/zap-baseline.py -t http://localhost:3000 -r zap-report.html
+          zap-baseline.py -t http://localhost:3000 -r zap-report.html
 
-      # Upload Reports
       - name: Upload Reports
         uses: actions/upload-artifact@v4
         with:
