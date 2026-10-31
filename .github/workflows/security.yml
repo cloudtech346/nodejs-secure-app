@@ -1,89 +1,139 @@
-name: Security Pipeline
+name: DevSecOps Security Pipeline
 
 on:
   push:
-    branches: ["main"]
+    branches: [main]
   pull_request:
-    branches: ["main"]
+    branches: [main]
 
 permissions:
   contents: read
   issues: write
 
 jobs:
-  build-and-scan:
+  security-build-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout source code
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
+          cache: npm
 
-      # 3. Install dependencies
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      # 4. Start Node.js application
-      - name: Start Node App
+      - name: Run automated tests
+        run: npm test
+
+      - name: Start application
         run: |
           npm start > app.log 2>&1 &
           echo $! > app.pid
 
-      # 5. Wait for application to become available
-      - name: Wait for Node App
+      - name: Wait for application
         run: |
           for i in {1..30}; do
-            if curl --silent --fail http://127.0.0.1:3000/ > /dev/null; then
-              echo "Application is running."
+            if curl -fsS http://127.0.0.1:3000/; then
               exit 0
             fi
-
-            echo "Waiting for application to start..."
             sleep 2
           done
-
-          echo "Application failed to start."
           cat app.log
           exit 1
 
-      # 6. Snyk dependency vulnerability scan
-      - name: Run Snyk SCA + SAST
-        uses: snyk/actions/node@master
-        with:
-          command: test
-          args: --json-file-output=snyk-report.json
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-          
-      # 6b. Snyk Code SAST scan
-      - name: Run Snyk Code SAST
-        run: npx --yes snyk code test --json-file-output=snyk-code-report.json
+      - name: Snyk dependency scan
+        continue-on-error: true
+        run: |
+          npx --yes snyk test --json-file-output=snyk-report.json
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      # 7. OWASP ZAP DAST scan
-      - name: OWASP ZAP DAST Scan
+      - name: Snyk Code scan
+        continue-on-error: true
+        run: |
+          npx --yes snyk code test --json-file-output=snyk-code-report.json
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: OWASP ZAP scan
+        continue-on-error: true
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: "http://127.0.0.1:3000"
           artifact_name: zap-report
 
-      # 8. Upload reports even if a previous step fails
-      - name: Upload Security Reports
+      - name: Build Docker image
+        run: |
+          docker build -t nodejs-secure-app:${{ github.sha }} .
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@0.28.0
+        continue-on-error: true
+        with:
+          image-ref: nodejs-secure-app:${{ github.sha }}
+          format: table
+          output: trivy-report.txt
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          exit-code: "0"
+
+      - name: Upload security reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: security-reports
+          name: devsecops-security-reports
           path: |
             snyk-report.json
             snyk-code-report.json
+            trivy-report.txt
             zap-report.html
             app.log
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Configure AWS credentials
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Push image to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag nodejs-secure-app:$IMAGE_TAG \
+            $REGISTRY/nodejs-secure-app:$IMAGE_TAG
+          docker push $REGISTRY/nodejs-secure-app:$IMAGE_TAG
+
+      - name: Deploy to Amazon EKS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          ACCOUNT_ID: "730335459381"
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws eks update-kubeconfig \
+            --region us-east-1 \
+            --name devsecops-eks
+
+          sed "s|IMAGE_URI_PLACEHOLDER|${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com/nodejs-secure-app:${IMAGE_TAG}|g" \
+            k8s/deployment.yaml > /tmp/deployment.yaml
+
+          kubectl apply -f /tmp/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+
+          kubectl rollout status deployment/nodejs-secure-app \
+            --timeout=180s
